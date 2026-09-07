@@ -388,7 +388,9 @@ textarea:focus-visible,
   display: block;
   width: 100%;
   min-width: 760px;
+  max-width: 880px;
   height: auto;
+  margin-inline: auto;
 }
 
 .sd-arch-guides path {
@@ -421,6 +423,24 @@ textarea:focus-visible,
   fill: #878d80;
   font-size: 13px;
   font-weight: 400;
+}
+
+/* Tighten the middle of the odontogram without touching tooth
+   geometry: nudge each arch toward the midline. The individual
+   `translate` property composes with (not overrides) the per-tooth
+   `transform` attribute that carries position + rotation. */
+.sd-arch .tooth[data-tooth^="1"],
+.sd-arch .tooth[data-tooth^="2"],
+.sd-arch .tooth[data-tooth^="5"],
+.sd-arch .tooth[data-tooth^="6"] {
+  translate: 0 24px;
+}
+
+.sd-arch .tooth[data-tooth^="3"],
+.sd-arch .tooth[data-tooth^="4"],
+.sd-arch .tooth[data-tooth^="7"],
+.sd-arch .tooth[data-tooth^="8"] {
+  translate: 0 -24px;
 }
 
 .tooth {
@@ -484,6 +504,8 @@ textarea:focus-visible,
 
 .sd-details {
   overflow: hidden;
+  position: sticky;
+  top: 20px;
 }
 
 .sd-details-heading {
@@ -827,6 +849,7 @@ textarea:focus-visible,
   .sd-details {
     display: grid;
     grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+    position: static;
   }
 
   .sd-details-heading {
