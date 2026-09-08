@@ -720,15 +720,16 @@ textarea:focus-visible,
 }
 
 .sd-legend {
-  margin-top: 8px;
-  padding: 6px 10px;
+  margin-top: 0;
+  padding: 4px 12px 6px;
+  border-top: 1px solid var(--line);
 }
 
 .sd-legend-items {
   display: flex;
   flex-wrap: wrap;
-  gap: 4px 12px;
-  margin: 4px 0 2px;
+  gap: 3px 12px;
+  margin: 3px 0 1px;
   padding: 0;
   list-style: none;
 }
@@ -749,8 +750,8 @@ textarea:focus-visible,
   display: flex;
   flex-wrap: wrap;
   gap: 3px 12px;
-  margin-top: 4px;
-  padding-top: 5px;
+  margin-top: 3px;
+  padding-top: 4px;
   border-top: 1px solid var(--line);
   font-size: 10px;
   color: var(--muted);
@@ -909,8 +910,8 @@ textarea:focus-visible,
   }
 
   .sd-legend {
-    margin-top: 8px;
-    padding: 8px;
+    margin-top: 0;
+    padding: 4px 10px 6px;
   }
 
   .sd-legend-items {

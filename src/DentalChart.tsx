@@ -350,6 +350,40 @@ export function DentalChart({
               <span>{recordedCount} {t.marked}</span>
               <span className="sd-scroll-help">{t.scrollHelp}</span>
             </div>
+
+            <section
+              className="sd-legend"
+              aria-labelledby={`${id}-legend-title`}
+            >
+              <h2 id={`${id}-legend-title`} className="sd-small-heading">
+                {t.legend}
+              </h2>
+
+              <ul className="sd-legend-items">
+                {FINDINGS.map((findingKind) => (
+                  <li key={findingKind}>
+                    <span
+                      className="sd-swatch"
+                      style={{ backgroundColor: COLORS[findingKind] }}
+                      aria-hidden="true"
+                    />
+                    {t.findings[findingKind]}
+                  </li>
+                ))}
+              </ul>
+
+              <p>{t.legendHelp}</p>
+
+              <div className="sd-surface-legend">
+                {SURFACES.map((surface) => (
+                  <span key={surface}>
+                    <bdi>{surface}</bdi>
+                    {" = "}
+                    {t.surfaces[surface]}
+                  </span>
+                ))}
+              </div>
+            </section>
           </section>
 
           <aside
@@ -540,39 +574,6 @@ export function DentalChart({
           </aside>
         </div>
 
-        <section
-          className="sd-card sd-legend"
-          aria-labelledby={`${id}-legend-title`}
-        >
-          <h2 id={`${id}-legend-title`} className="sd-small-heading">
-            {t.legend}
-          </h2>
-
-          <ul className="sd-legend-items">
-            {FINDINGS.map((findingKind) => (
-              <li key={findingKind}>
-                <span
-                  className="sd-swatch"
-                  style={{ backgroundColor: COLORS[findingKind] }}
-                  aria-hidden="true"
-                />
-                {t.findings[findingKind]}
-              </li>
-            ))}
-          </ul>
-
-          <p>{t.legendHelp}</p>
-
-          <div className="sd-surface-legend">
-            {SURFACES.map((surface) => (
-              <span key={surface}>
-                <bdi>{surface}</bdi>
-                {" = "}
-                {t.surfaces[surface]}
-              </span>
-            ))}
-          </div>
-        </section>
 
       </div>
     </main>
