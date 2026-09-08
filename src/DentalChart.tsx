@@ -181,46 +181,8 @@ export function DentalChart({
       lang={language}
     >
       <div className="sd-shell">
-        <header className="sd-header">
-          <div className="sd-brand">
-            <span className="sd-brand-mark" aria-hidden="true">
-              <svg viewBox="0 0 32 32" width="28" height="28">
-                <path
-                  d="M7 5 Q11 2 16 5 Q23 1 26 7 Q28 12 24 20 Q22 29 19 27 L17 19 Q16 16 14 20 L12 27 Q8 29 7 21 Q2 11 7 5Z"
-                  fill="#fffdf6"
-                  stroke="currentColor"
-                  strokeWidth="2.2"
-                  strokeLinejoin="round"
-                />
-              </svg>
-            </span>
-            <div>
-              <strong className="sd-wordmark" dir="ltr">
-                SmileDesk<span>®</span>
-              </strong>
-              <div className="sd-eyebrow">{t.workspace}</div>
-            </div>
-          </div>
-
-          <div className="sd-header-title">
-            <h1>{t.title}</h1>
-            <p>{t.subtitle}</p>
-          </div>
-
-          <button
-            className="sd-button sd-language"
-            type="button"
-            onClick={() =>
-              setLanguage((previous) => previous === "ar" ? "en" : "ar")
-            }
-            lang={language === "ar" ? "en" : "ar"}
-          >
-            <span aria-hidden="true">◎</span>
-            {language === "ar" ? "English" : "العربية"}
-          </button>
-        </header>
-
         <section className="sd-controls" aria-label={t.dentition}>
+          <h1 className="sd-title">{t.title}</h1>
           <div
             className="sd-segmented"
             role="group"
@@ -264,6 +226,18 @@ export function DentalChart({
               {t.reset}
             </button>
           </div>
+
+          <button
+            className="sd-button sd-language"
+            type="button"
+            onClick={() =>
+              setLanguage((previous) => previous === "ar" ? "en" : "ar")
+            }
+            lang={language === "ar" ? "en" : "ar"}
+          >
+            <span aria-hidden="true">◎</span>
+            {language === "ar" ? "English" : "العربية"}
+          </button>
         </section>
 
         <section
@@ -600,10 +574,6 @@ export function DentalChart({
           </div>
         </section>
 
-        <footer className="sd-page-footer">
-          <span dir="ltr">SmileDesk / Dental Chart</span>
-          <span>{t.localOnly}</span>
-        </footer>
       </div>
     </main>
   );
