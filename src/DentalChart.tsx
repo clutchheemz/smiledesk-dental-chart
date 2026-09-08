@@ -112,6 +112,16 @@ export function DentalChart({
     setStatus(null);
   }
 
+  function selectKind(next: FindingKind) {
+    if (next === kind) return;
+
+    setKind(next);
+    // Draft surfaces belong to the finding being entered: never carry
+    // an uncommitted selection over to another finding.
+    setSurfaces([]);
+    setStatus(null);
+  }
+
   function toggleSurface(surface: Surface) {
     setSurfaces((previous) =>
       previous.includes(surface)
@@ -262,7 +272,7 @@ export function DentalChart({
                   kind === findingKind ? "is-active" : ""
                 }`}
                 aria-pressed={kind === findingKind}
-                onClick={() => setKind(findingKind)}
+                onClick={() => selectKind(findingKind)}
               >
                 <span
                   className="sd-swatch"
