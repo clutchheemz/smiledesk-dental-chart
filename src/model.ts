@@ -2,6 +2,9 @@ export type Language = "ar" | "en";
 export type Dentition = "permanent" | "primary";
 export type Surface = "O" | "M" | "D" | "B" | "L";
 
+export const CARIES_CLASSES = ["I", "II", "III", "IV", "V"] as const;
+export type CariesClass = (typeof CARIES_CLASSES)[number];
+
 export type FindingKind =
   | "caries"
   | "filling"
@@ -14,8 +17,11 @@ export type FindingKind =
 export interface Finding {
   id: string;
   kind: FindingKind;
+  /** Retained for imported snapshots; all new findings use an empty array. */
   surfaces: Surface[];
   note: string;
+  /** Absent on non-caries findings and imported, unclassified caries. */
+  cariesClass?: CariesClass;
 }
 
 export interface ChartValue {
@@ -204,6 +210,13 @@ export type ChartAction =
       id: string;
     }
   | {
+      type: "note";
+      dentition: Dentition;
+      tooth: string;
+      id: string;
+      note: string;
+    }
+  | {
       type: "reset";
       dentition: Dentition;
     }
@@ -264,21 +277,48 @@ export function chartReducer(
   const previous = state.value[dentition][action.tooth] ?? [];
 
   if (action.type === "add") {
-    const surfaces = usesSurfaces(action.finding.kind)
-      ? SURFACES.filter((surface) =>
-          action.finding.surfaces.includes(surface)
-        )
-      : [];
+    const { id, kind, cariesClass } = action.finding;
 
-    if (usesSurfaces(action.finding.kind) && surfaces.length === 0) {
+    if (!FINDINGS.includes(kind)) return state;
+
+    if (
+      [state.value.permanent, state.value.primary].some((teeth) =>
+        Object.values(teeth).some((findings) =>
+          findings.some((finding) => finding.id === id)
+        )
+      )
+    ) {
+      return state;
+    }
+
+    if (kind === "caries") {
+      if (
+        !cariesClass ||
+        !CARIES_CLASSES.includes(cariesClass) ||
+        previous.some((finding) =>
+          finding.kind === "caries" && finding.cariesClass === cariesClass
+        )
+      ) {
+        return state;
+      }
+    } else if (kind === "missing" || kind === "implant") {
+      // Alternating structural findings must be able to change visibility.
+      const latestStructural = previous.filter((finding) =>
+        finding.kind === "missing" || finding.kind === "implant"
+      ).at(-1);
+      if (latestStructural?.kind === kind) return state;
+    } else if (previous.some((finding) => finding.kind === kind)) {
       return state;
     }
 
     const finding: Finding = {
-      ...action.finding,
-      surfaces,
+      id,
+      kind,
+      surfaces: [],
       note: action.finding.note.trim().slice(0, 160)
     };
+
+    if (kind === "caries") finding.cariesClass = cariesClass;
 
     return commit(
       state,
@@ -287,6 +327,27 @@ export function chartReducer(
         [dentition]: {
           ...state.value[dentition],
           [action.tooth]: [...previous, finding]
+        }
+      },
+      dentition
+    );
+  }
+
+  if (action.type === "note") {
+    const index = previous.findIndex((finding) => finding.id === action.id);
+    const note = action.note.trim().slice(0, 160);
+
+    if (index === -1 || previous[index].note === note) return state;
+
+    return commit(
+      state,
+      {
+        ...state.value,
+        [dentition]: {
+          ...state.value[dentition],
+          [action.tooth]: previous.map((finding, findingIndex) =>
+            findingIndex === index ? { ...finding, note } : finding
+          )
         }
       },
       dentition

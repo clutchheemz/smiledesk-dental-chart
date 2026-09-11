@@ -1,84 +1,64 @@
 import {
-  useEffect,
-  useId,
-  useReducer,
-  useRef,
-  useState
+  useEffect, useId, useReducer, useRef, useState, useSyncExternalStore,
+  type KeyboardEvent
 } from "react";
 import {
-  COLORS,
-  FDI,
-  FINDINGS,
-  SURFACES,
-  chartReducer,
-  countFindings,
-  createHistory,
-  isPatientRight,
-  isUpper,
-  toothKind,
-  usesSurfaces,
-  type ChartValue,
-  type Dentition,
-  type FindingKind,
-  type Language,
-  type Surface
+  CARIES_CLASSES, COLORS, FDI, FINDINGS, chartReducer, countFindings,
+  createHistory, isPatientRight, isUpper, toothKind,
+  type CariesClass, type ChartAction, type ChartValue, type Dentition,
+  type FindingKind, type Language
 } from "./model";
 import { MESSAGES } from "./i18n";
 import { Tooth } from "./Tooth";
 
 export interface DentalChartProps {
-  /**
-   * Initial snapshot, read once on mount.
-   * The component owns its subsequent state.
-   */
+  /** Initial snapshot, read once on mount. Subsequent state is owned here. */
   initialValue?: ChartValue;
-
-  /**
-   * Called after clinical changes: add, remove, undo, reset.
-   * Not called for selection, drafts, language, or dentition switching.
-   * Treat emitted snapshots as immutable.
-   */
+  /** Clinical changes only, including note edits. Treat snapshots as immutable. */
   onChange?: (value: ChartValue) => void;
-
   initialLanguage?: Language;
 }
 
-type Status = "applied" | "removed" | "undone" | "resetDone" | null;
+const compactQuery = "(max-width: 700px)";
+function subscribeViewport(notify: () => void) {
+  const media = window.matchMedia?.(compactQuery);
+  media?.addEventListener("change", notify);
+  return () => media?.removeEventListener("change", notify);
+}
+function compactSnapshot() {
+  return window.matchMedia?.(compactQuery).matches ?? false;
+}
+
+type Status = {
+  key: "added" | "alreadyRecorded" | "removed" | "undone" | "resetDone" | "noteSaved";
+  tooth?: string;
+  kind?: FindingKind;
+  cariesClass?: CariesClass;
+} | null;
 
 export function DentalChart({
-  initialValue,
-  onChange,
-  initialLanguage = "ar"
+  initialValue, onChange, initialLanguage = "ar"
 }: DentalChartProps) {
-  const [history, dispatch] = useReducer(
-    chartReducer,
-    initialValue,
-    createHistory
-  );
-
+  const [history, dispatch] = useReducer(chartReducer, initialValue, createHistory);
   const [language, setLanguage] = useState<Language>(initialLanguage);
   const [dentition, setDentition] = useState<Dentition>("permanent");
-  const [selection, setSelection] = useState<Record<Dentition, string>>({
-    permanent: "11",
-    primary: "51"
+  const [selection, setSelection] = useState<Record<Dentition, string | null>>({
+    permanent: null, primary: null
   });
-
-  const [kind, setKind] = useState<FindingKind>("caries");
-  const [surfaces, setSurfaces] = useState<Surface[]>([]);
-  const [note, setNote] = useState("");
   const [status, setStatus] = useState<Status>(null);
-
+  const compact = useSyncExternalStore(subscribeViewport, compactSnapshot, () => false);
   const previousValue = useRef(history.value);
+  const chartRef = useRef<SVGSVGElement>(null);
   const id = useId();
-
   const t = MESSAGES[language];
   const number = selection[dentition];
-  const currentFindings = history.value[dentition][number] ?? [];
-  const needsSurfaces = usesSurfaces(kind);
-  const canApply = !needsSurfaces || surfaces.length > 0;
+  const currentFindings = number ? history.value[dentition][number] ?? [] : [];
   const recordedCount = countFindings(history.value, dentition);
-  const toothCount =
-    FDI[dentition].upper.length + FDI[dentition].lower.length;
+  const teeth = [...FDI[dentition].upper, ...FDI[dentition].lower];
+  const quadrantLabels = [t.upperRight, t.upperLeft, t.lowerRight, t.lowerLeft];
+  const quadrantLabel = number ? isUpper(number)
+    ? isPatientRight(number) ? t.upperRight : t.upperLeft
+    : isPatientRight(number) ? t.lowerRight : t.lowerLeft : "";
 
   useEffect(() => {
     if (previousValue.current !== history.value) {
@@ -87,461 +67,225 @@ export function DentalChart({
     }
   }, [history.value, onChange]);
 
-  function clearDraft() {
-    setSurfaces([]);
-    setNote("");
-  }
-
   function selectTooth(next: string) {
-    if (next === number) return;
-
-    setSelection((previous) => ({
-      ...previous,
-      [dentition]: next
-    }));
-
-    clearDraft();
+    setSelection((previous) => ({ ...previous, [dentition]: next }));
     setStatus(null);
   }
 
-  function switchDentition(next: Dentition) {
-    if (next === dentition) return;
-
-    setDentition(next);
-    clearDraft();
-    setStatus(null);
-  }
-
-  function toggleSurface(surface: Surface) {
-    setSurfaces((previous) =>
-      previous.includes(surface)
-        ? previous.filter((item) => item !== surface)
-        : SURFACES.filter(
-            (item) => item === surface || previous.includes(item)
-          )
-    );
-  }
-
-  function applyFinding() {
-    if (!canApply) return;
-
-    dispatch({
-      type: "add",
-      dentition,
-      tooth: number,
-      finding: {
-        id: crypto.randomUUID(),
-        kind,
-        surfaces: needsSurfaces ? surfaces : [],
-        note
-      }
-    });
-
-    clearDraft();
-    setStatus("applied");
+  function addFinding(kind: FindingKind, cariesClass?: CariesClass) {
+    if (!number) return;
+    const action: ChartAction = {
+      type: "add", dentition, tooth: number,
+      finding: { id: crypto.randomUUID(), kind, cariesClass, surfaces: [], note: "" }
+    };
+    // Use the reducer's validation for feedback as well as batched/rapid input.
+    const duplicate = chartReducer(history, action) === history;
+    dispatch(action);
+    setStatus({ key: duplicate ? "alreadyRecorded" : "added", tooth: number, kind, cariesClass });
   }
 
   function undo() {
     const previous = history.past.at(-1);
     if (!previous) return;
-
-    // Make the affected dentition visible when undo crosses dentitions.
     setDentition(previous.dentition);
     dispatch({ type: "undo" });
-    clearDraft();
-    setStatus("undone");
+    setStatus({ key: "undone" });
   }
 
   function reset() {
-    const confirmed = window.confirm(
-      dentition === "permanent"
-        ? t.confirmPermanent
-        : t.confirmPrimary
-    );
-
-    if (!confirmed) return;
-
+    if (!window.confirm(dentition === "permanent" ? t.confirmPermanent : t.confirmPrimary)) return;
     dispatch({ type: "reset", dentition });
-    clearDraft();
-    setStatus("resetDone");
+    setStatus({ key: "resetDone" });
   }
 
-  const quadrantLabel = isUpper(number)
-    ? isPatientRight(number)
-      ? t.upperRight
-      : t.upperLeft
-    : isPatientRight(number)
-      ? t.lowerRight
-      : t.lowerLeft;
+  function navigateTeeth(event: KeyboardEvent<SVGSVGElement>) {
+    const target = (event.target as Element).closest<SVGGElement>("[data-tooth]");
+    if (!target) return;
+    const index = teeth.indexOf(target.dataset.tooth!);
+    const columns = FDI[dentition].upper.length / (compact ? 2 : 1);
+    const rowStart = Math.floor(index / columns) * columns;
+    const next = event.key === "ArrowRight" ? index + 1
+      : event.key === "ArrowLeft" ? index - 1
+      : event.key === "ArrowDown" ? index + columns
+      : event.key === "ArrowUp" ? index - columns
+      : event.key === "Home" ? rowStart
+      : event.key === "End" ? rowStart + columns - 1 : null;
+    if (next === null) return;
+    event.preventDefault();
+    if (!teeth[next]) return;
+    selectTooth(teeth[next]);
+    chartRef.current?.querySelector<SVGGElement>(`[data-tooth="${teeth[next]}"]`)?.focus();
+  }
 
   return (
-    <main
-      className="sd-chart"
-      dir={language === "ar" ? "rtl" : "ltr"}
-      lang={language}
-    >
+    <main className="sd-chart" dir={language === "ar" ? "rtl" : "ltr"} lang={language}>
       <div className="sd-shell">
-        <section className="sd-controls" aria-label={t.dentition}>
-          <h1 className="sd-title">{t.title}</h1>
-          <div
-            className="sd-segmented"
-            role="group"
-            aria-label={t.dentition}
-          >
+        <header className="sd-controls">
+          <div className="sd-brand">
+            <span className="sd-brand-name" dir="ltr">SmileDesk<span aria-hidden="true">.</span></span>
+            <h1>{t.title}</h1>
+          </div>
+          <div className="sd-segmented" role="group" aria-label={t.dentition}>
             {(["permanent", "primary"] as const).map((item) => (
-              <button
-                key={item}
-                type="button"
-                className={`sd-segment ${
-                  dentition === item ? "is-active" : ""
-                }`}
+              <button key={item} type="button" className="sd-segment"
                 aria-pressed={dentition === item}
-                onClick={() => switchDentition(item)}
-              >
-                {t[item]}
-                <span className="sd-count" dir="ltr">
-                  {item === "permanent" ? "32" : "20"}
-                </span>
+                onClick={() => { setDentition(item); setStatus(null); }}>
+                {t[item]} <span className="sd-count" dir="ltr">{item === "permanent" ? 32 : 20}</span>
               </button>
             ))}
           </div>
-
           <div className="sd-history-actions">
-            <button
-              className="sd-button"
-              type="button"
-              disabled={history.past.length === 0}
-              onClick={undo}
-            >
-              <span aria-hidden="true">↶</span>
-              {t.undo}
+            <button className="sd-button" type="button" disabled={!history.past.length} onClick={undo}>
+              <span aria-hidden="true">↶</span>{t.undo}
             </button>
-
-            <button
-              className="sd-button sd-danger"
-              type="button"
-              disabled={recordedCount === 0}
-              onClick={reset}
-            >
-              {t.reset}
+            <button className="sd-button sd-danger" type="button" disabled={!recordedCount} onClick={reset} title={t.reset}>
+              <span aria-hidden="true">↺</span><span className="sd-reset-label">{t.reset}</span>
             </button>
           </div>
-
-          <button
-            className="sd-button sd-language"
-            type="button"
-            onClick={() =>
-              setLanguage((previous) => previous === "ar" ? "en" : "ar")
-            }
-            lang={language === "ar" ? "en" : "ar"}
-          >
-            <span aria-hidden="true">◎</span>
+          <button className="sd-button sd-language" type="button"
+            onClick={() => { setLanguage(language === "ar" ? "en" : "ar"); setStatus(null); }}
+            lang={language === "ar" ? "en" : "ar"}>
             {language === "ar" ? "English" : "العربية"}
           </button>
-        </section>
-
-        <section
-          className="sd-card sd-toolbar"
-          aria-labelledby={`${id}-toolbar-title`}
-        >
-          <h2 id={`${id}-toolbar-title`} className="sd-small-heading">
-            <span className="sd-step">01</span>
-            {t.findingToolbar}
-          </h2>
-
-          <div
-            className="sd-finding-buttons"
-            role="group"
-            aria-label={t.findingToolbar}
-          >
-            {FINDINGS.map((findingKind) => (
-              <button
-                key={findingKind}
-                type="button"
-                className={`sd-finding-button ${
-                  kind === findingKind ? "is-active" : ""
-                }`}
-                aria-pressed={kind === findingKind}
-                onClick={() => setKind(findingKind)}
-              >
-                <span
-                  className="sd-swatch"
-                  style={{ backgroundColor: COLORS[findingKind] }}
-                  aria-hidden="true"
-                />
-                {t.findings[findingKind]}
-                {kind === findingKind && (
-                  <span className="sd-check" aria-hidden="true">✓</span>
-                )}
-              </button>
-            ))}
-          </div>
-        </section>
+        </header>
 
         <div className="sd-workspace">
-          <section
-            className="sd-card sd-odontogram"
-            aria-labelledby={`${id}-chart-title`}
-          >
+          <section className="sd-card sd-odontogram" aria-labelledby={`${id}-chart-title`}>
             <div className="sd-card-heading">
-              <div>
-                <h2 id={`${id}-chart-title`}>
-                  <span className="sd-step">02</span>
-                  {t.chart}
-                </h2>
-                <p>{t.chartHelp}</p>
-              </div>
-              <span className="sd-tag" dir="ltr">FDI</span>
+              <div><h2 id={`${id}-chart-title`}>{t.chart}</h2><p>{t.chartHelp}</p></div>
+              <span className="sd-tag" dir="ltr">FDI <b>{teeth.length}</b></span>
             </div>
-
-            <div
-              className="sd-chart-scroll"
-              dir="ltr"
-              role="region"
-              aria-label={t.chart}
-              tabIndex={0}
-            >
-              <svg
-                className="sd-arch"
-                viewBox="0 16 900 700"
-                aria-label={`${t.chart} — ${t[dentition]}`}
-              >
+            <div className="sd-chart-stage" dir="ltr">
+              <svg ref={chartRef} className={`sd-arch${compact ? " is-compact" : ""}`}
+                viewBox={compact ? "0 0 480 560" : "0 16 900 700"}
+                aria-label={`${t.chart} - ${t[dentition]}`} aria-describedby={`${id}-keyboard-help`}
+                onKeyDown={navigateTeeth}>
                 <g aria-hidden="true" className="sd-arch-guides">
-                  <path d="M450 28 V178 M450 550 V704" />
-                  <text x="450" y="243">{t.upperJaw}</text>
-                  <text x="450" y="497">{t.lowerJaw}</text>
-                  <text x="95" y="365" className="sd-side-label">
-                    {t.patientRight}
-                  </text>
-                  <text x="805" y="365" className="sd-side-label">
-                    {t.patientLeft}
-                  </text>
-                  <text x="450" y="357" className="sd-center-label">
-                    {t[dentition]}
-                  </text>
-                  <text x="450" y="383" className="sd-center-count">
-                    {toothCount} {t.teeth} · FDI
-                  </text>
+                  {compact ? quadrantLabels.map((label, index) => (
+                    <g key={index}>
+                      {index > 0 && <path d={`M12 ${index * 140} H468`} />}
+                      <text x="240" y={index * 140 + 15} className="sd-quadrant-label">{label}</text>
+                    </g>
+                  )) : <>
+                    <path d="M450 28 V178 M450 550 V704" />
+                    <text x="450" y="245">{t.upperJaw}</text>
+                    <text x="450" y="493">{t.lowerJaw}</text>
+                    <text x="160" y="365" className="sd-side-label">{t.patientRight}</text>
+                    <text x="740" y="365" className="sd-side-label">{t.patientLeft}</text>
+                    <text x="450" y="357" className="sd-center-label">{t[dentition]}</text>
+                    <text x="450" y="383" className="sd-center-count">{teeth.length} {t.teeth}</text>
+                  </>}
                 </g>
-
                 {(["upper", "lower"] as const).map((arch) =>
                   FDI[dentition][arch].map((tooth, index) => (
-                    <Tooth
-                      key={tooth}
-                      number={tooth}
-                      index={index}
-                      count={FDI[dentition][arch].length}
-                      upper={arch === "upper"}
-                      selected={tooth === number}
-                      findings={history.value[dentition][tooth] ?? []}
-                      language={language}
-                      onSelect={() => selectTooth(tooth)}
-                    />
+                    <Tooth key={tooth} number={tooth} index={index}
+                      count={FDI[dentition][arch].length} upper={arch === "upper"}
+                      compact={compact} selected={tooth === number}
+                      tabIndex={tooth === (number ?? teeth[0]) ? 0 : -1}
+                      findings={history.value[dentition][tooth] ?? []} language={language}
+                      onSelect={() => selectTooth(tooth)} />
                   ))
                 )}
               </svg>
             </div>
-
             <div className="sd-chart-footer">
-              <span className="sd-selection-key">
-                <span aria-hidden="true" />
-                {t.selected}
-              </span>
-              <span>{recordedCount} {t.marked}</span>
-              <span className="sd-scroll-help">{t.scrollHelp}</span>
+              <span className="sd-selection-key"><i aria-hidden="true" />{t.selected}</span>
+              <span id={`${id}-keyboard-help`} className="sd-keyboard-help">{t.keyboardHelp}</span>
+              <span><b>{recordedCount}</b> {t.marked}</span>
             </div>
-
           </section>
 
-          <aside
-            className="sd-card sd-details"
-            aria-labelledby={`${id}-details-title`}
-          >
-            <div className="sd-details-heading">
+          <section className="sd-card sd-actions" aria-labelledby={`${id}-selected-title`}>
+            <div className="sd-selected-heading">
+              <span className="sd-tooth-number" dir="ltr">{number ?? "--"}</span>
               <div>
                 <div className="sd-eyebrow">{t.selectedTooth}</div>
-                <h2 id={`${id}-details-title`}>
-                  {t.tooth}
-                  {" "}
-                  <bdi>{number}</bdi>
-                </h2>
-                <p>
-                  {quadrantLabel}
-                  <span aria-hidden="true"> · </span>
-                  {t.toothKinds[toothKind(number)]}
-                </p>
+                <h2 id={`${id}-selected-title`}>{number ? <>{t.tooth} <bdi>{number}</bdi></> : t.selectTooth}</h2>
+                {number && <p>{quadrantLabel} · {t.toothKinds[toothKind(number)]}</p>}
               </div>
-              <span className="sd-tooth-number" dir="ltr">
-                {number}
-              </span>
             </div>
-
-            <div className="sd-draft">
-              <div className="sd-draft-kind">
-                <span
-                  className="sd-swatch"
-                  style={{ backgroundColor: COLORS[kind] }}
-                  aria-hidden="true"
-                />
-                <strong>{t.findings[kind]}</strong>
-                <span className="sd-step">03</span>
+            <fieldset className="sd-classes" disabled={!number}>
+              <legend>{t.cariesClasses}</legend>
+              <div className="sd-class-buttons" dir="ltr">
+                {CARIES_CLASSES.map((cariesClass) => {
+                  const recorded = currentFindings.some((finding) =>
+                    finding.kind === "caries" && finding.cariesClass === cariesClass);
+                  return <button key={cariesClass} className="sd-class-button" type="button"
+                    aria-label={`${t.classLabel} ${cariesClass}`} aria-pressed={recorded}
+                    title={`${t.classLabel} ${cariesClass}: ${t.classDescriptions[cariesClass]}`}
+                    onClick={() => addFinding("caries", cariesClass)}>
+                    <span className="sd-class-word" lang={language}>{t.classLabel}</span>
+                    <b>{cariesClass}</b><span className="sd-class-check" aria-hidden="true">{recorded ? "✓" : "+"}</span>
+                  </button>;
+                })}
               </div>
-
-              <fieldset className="sd-surfaces" disabled={!needsSurfaces}>
-                <legend>{t.surfacesTitle}</legend>
-                <div className="sd-surface-buttons" dir="ltr">
-                  {SURFACES.map((surface) => (
-                    <button
-                      key={surface}
-                      type="button"
-                      aria-label={`${surface} — ${t.surfaces[surface]}`}
-                      aria-pressed={
-                        needsSurfaces && surfaces.includes(surface)
-                      }
-                      title={t.surfaces[surface]}
-                      className={`sd-surface ${
-                        needsSurfaces && surfaces.includes(surface)
-                          ? "is-active"
-                          : ""
-                      }`}
-                      onClick={() => toggleSurface(surface)}
-                    >
-                      {surface}
-                    </button>
-                  ))}
-                </div>
-              </fieldset>
-
-              <p className="sd-helper">
-                {needsSurfaces ? t.surfacesHelp : t.wholeToothHelp}
-              </p>
-
-              {needsSurfaces && surfaces.length > 0 && (
-                <div className="sd-surface-summary">
-                  {surfaces.map((surface) => (
-                    <span key={surface}>
-                      <bdi>{surface}</bdi>
-                      {" · "}
-                      {t.surfaces[surface]}
-                    </span>
-                  ))}
-                </div>
-              )}
-
-              <label className="sd-note-label" htmlFor={`${id}-note`}>
-                {t.note}
-              </label>
-              <textarea
-                id={`${id}-note`}
-                className="sd-note"
-                dir="auto"
-                rows={3}
-                maxLength={160}
-                value={note}
-                onChange={(event) => setNote(event.target.value)}
-                aria-describedby={`${id}-note-help`}
-              />
-              <div className="sd-note-meta" id={`${id}-note-help`}>
-                <span>{t.noteHelp}</span>
-                <bdi>{note.length}/160</bdi>
-              </div>
-
-              <button
-                className="sd-button sd-apply"
-                type="button"
-                disabled={!canApply}
-                onClick={applyFinding}
-              >
-                <span aria-hidden="true">+</span>
-                {t.apply}
-              </button>
-
-              {!canApply && (
-                <p className="sd-helper">{t.chooseSurfaces}</p>
-              )}
+            </fieldset>
+            <div className="sd-status" role="status" aria-live="polite" aria-atomic="true">
+              {status ? <>{t[status.key]}{status.tooth && <> · {t.tooth} <bdi>{status.tooth}</bdi></>}
+                {status.kind && <> · {status.cariesClass ? <>{t.classLabel} <bdi>{status.cariesClass}</bdi></> : t.findings[status.kind]}</>}
+              </> : number ? t.instantHelp : t.selectHelp}
             </div>
+          </section>
 
-            <section
-              className="sd-current"
-              aria-labelledby={`${id}-current-title`}
-            >
+          <aside className="sd-card sd-details" aria-label={t.currentFindings}>
+            <details className="sd-other-findings">
+              <summary>{t.otherFindings}<span aria-hidden="true">+</span></summary>
+              <div className="sd-finding-buttons" role="group" aria-label={t.otherFindings}>
+                {FINDINGS.filter((kind) => kind !== "caries").map((kind) => (
+                  <button key={kind} className="sd-finding-button" type="button" disabled={!number}
+                    onClick={() => addFinding(kind)}>
+                    <span className="sd-swatch" style={{ backgroundColor: COLORS[kind] }} aria-hidden="true" />
+                    {t.findings[kind]}
+                  </button>
+                ))}
+              </div>
+            </details>
+            <section className="sd-current" aria-labelledby={`${id}-current-title`}>
               <div className="sd-current-heading">
                 <h3 id={`${id}-current-title`}>{t.currentFindings}</h3>
                 <span className="sd-count">{currentFindings.length}</span>
               </div>
-
-              {currentFindings.length === 0 ? (
-                <p className="sd-empty">{t.noFindings}</p>
-              ) : (
-                <ul className="sd-record-list">
-                  {currentFindings.map((finding) => (
-                    <li key={finding.id} className="sd-record">
-                      <div className="sd-record-top">
-                        <span
-                          className="sd-swatch"
-                          style={{
-                            backgroundColor: COLORS[finding.kind]
-                          }}
-                          aria-hidden="true"
-                        />
-                        <strong>{t.findings[finding.kind]}</strong>
-                        <button
-                          className="sd-remove"
-                          type="button"
-                          aria-label={`${t.remove}: ${t.findings[finding.kind]}`}
-                          title={t.remove}
-                          onClick={() => {
-                            dispatch({
-                              type: "remove",
-                              dentition,
-                              tooth: number,
-                              id: finding.id
-                            });
-                            setStatus("removed");
-                          }}
-                        >
-                          <span aria-hidden="true">×</span>
-                        </button>
-                      </div>
-
-                      <div className="sd-record-surfaces">
-                        {finding.surfaces.length
-                          ? finding.surfaces.map((surface) => (
-                              <span
-                                key={surface}
-                                title={t.surfaces[surface]}
-                              >
-                                <bdi>{surface}</bdi>
-                                {" · "}
-                                {t.surfaces[surface]}
-                              </span>
-                            ))
-                          : <span>{t.wholeTooth}</span>}
-                      </div>
-
-                      {finding.note && (
-                        <p className="sd-record-note" dir="auto">
-                          {finding.note}
-                        </p>
-                      )}
-                    </li>
-                  ))}
-                </ul>
-              )}
+              {!currentFindings.length && <p className="sd-empty">{number ? t.noFindings : t.selectTooth}</p>}
+              <ul className="sd-record-list">
+                {currentFindings.map((finding) => {
+                  const label = finding.cariesClass
+                    ? `${t.findings.caries} · ${t.classLabel} ${finding.cariesClass}` : t.findings[finding.kind];
+                  return <li key={`${dentition}-${number}-${finding.id}`} className="sd-record">
+                    <div className="sd-record-top">
+                      <span className="sd-swatch" style={{ backgroundColor: COLORS[finding.kind] }} aria-hidden="true" />
+                      <strong>{label}</strong>
+                      <button className="sd-remove" type="button" aria-label={`${t.remove}: ${label}`} title={t.remove}
+                        onClick={() => {
+                          dispatch({ type: "remove", dentition, tooth: number!, id: finding.id });
+                          setStatus({ key: "removed", tooth: number! });
+                        }}><span aria-hidden="true">×</span></button>
+                    </div>
+                    <p className="sd-record-description">{finding.cariesClass ? t.classDescriptions[finding.cariesClass]
+                      : finding.kind === "caries" ? t.legacyCaries : t.wholeTooth}</p>
+                    {finding.note && <p className="sd-record-note" dir="auto">{finding.note}</p>}
+                    <details className="sd-note-details">
+                      <summary>{finding.note ? t.editNote : t.addNote}</summary>
+                      <label className="sd-note-label">{t.note}
+                        <textarea key={finding.note} className="sd-note" dir="auto" rows={2} maxLength={160}
+                          defaultValue={finding.note} aria-label={`${t.note}: ${label}`}
+                          aria-describedby={`${id}-note-help-${finding.id}`}
+                          onBlur={(event) => {
+                            // Merely viewing a legacy note must not normalize or truncate it.
+                            if (event.currentTarget.value === finding.note) return;
+                            const note = event.currentTarget.value.trim().slice(0, 160);
+                            if (note === finding.note) { event.currentTarget.value = note; return; }
+                            dispatch({ type: "note", dentition, tooth: number!, id: finding.id, note });
+                            setStatus({ key: "noteSaved", tooth: number! });
+                          }} />
+                      </label>
+                      <small id={`${id}-note-help-${finding.id}`}>{t.noteHelp} · 160</small>
+                    </details>
+                  </li>;
+                })}
+              </ul>
             </section>
-
-            <div
-              className="sd-status"
-              role="status"
-              aria-live="polite"
-              aria-atomic="true"
-            >
-              {status ? t[status] : "\u00a0"}
-            </div>
           </aside>
         </div>
-
-
       </div>
     </main>
   );

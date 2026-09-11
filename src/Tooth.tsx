@@ -1,5 +1,6 @@
 import type { KeyboardEvent } from "react";
 import {
+  CARIES_CLASSES,
   COLORS,
   FINDINGS,
   SURFACES,
@@ -142,6 +143,8 @@ interface ToothProps {
   index: number;
   count: number;
   upper: boolean;
+  compact?: boolean;
+  tabIndex?: number;
   selected: boolean;
   findings: Finding[];
   language: Language;
@@ -153,13 +156,22 @@ export function Tooth({
   index,
   count,
   upper,
+  compact = false,
+  tabIndex = 0,
   selected,
   findings,
   language,
   onSelect
 }: ToothProps) {
   const t = MESSAGES[language];
-  const position = archPosition(index, count, upper);
+  const row = Math.floor(index / (count / 2)) + (upper ? 0 : 2);
+  const position = compact ? {
+    x: ((index % (count / 2)) + 0.5) * 480 / (count / 2),
+    y: row * 140 + (upper ? 87 : 67),
+    angle: upper ? 0 : 180,
+    labelX: ((index % (count / 2)) + 0.5) * 480 / (count / 2),
+    labelY: row * 140 + 33
+  } : archPosition(index, count, upper);
   const shape = anatomy(number);
   const kind: ToothKind = toothKind(number);
   const primary = Number(number[0]) >= 5;
@@ -181,6 +193,10 @@ export function Tooth({
   const extraction = findings.some(
     (finding) => finding.kind === "extraction"
   );
+  const filling = findings.some((finding) => finding.kind === "filling");
+  const classes = CARIES_CLASSES.filter((cariesClass) => findings.some(
+    (finding) => finding.kind === "caries" && finding.cariesClass === cariesClass
+  ));
 
   const categories = FINDINGS.filter((category) =>
     findings.some((finding) => finding.kind === category)
@@ -189,7 +205,8 @@ export function Tooth({
   const markedSurfaces = new Map<Surface, string>();
 
   for (const finding of findings) {
-    if (finding.kind !== "caries" && finding.kind !== "filling") {
+    // Keep imported, unclassified caries visible without guessing a class.
+    if (finding.kind !== "caries" || finding.cariesClass) {
       continue;
     }
 
@@ -209,25 +226,27 @@ export function Tooth({
     ? "#f0f0ea"
     : crown
       ? COLORS.crown
-      : "#fffef9";
+      : filling
+        ? COLORS.filling
+        : classes.length ? "#f4c7bd" : "#fffef9";
+  const description = `${t.toothKinds[kind]} · ${categories.length
+    ? categories.map((category) => t.findings[category]).join(", ") : t.noFindings}${
+    classes.length ? ` · ${t.classLabel} ${classes.join(", ")}` : ""}`;
 
   return (
     <g
       className={`tooth ${selected ? "is-selected" : ""}`}
       role="button"
-      tabIndex={0}
+      tabIndex={tabIndex}
       aria-label={`${t.tooth} ${number}`}
+      aria-description={description}
       aria-pressed={selected}
       data-tooth={number}
       onClick={onSelect}
       onKeyDown={handleKey}
     >
       <title>
-        {`${t.tooth} ${number} · ${t.toothKinds[kind]} · ${
-          categories.length
-            ? categories.map((category) => t.findings[category]).join("، ")
-            : t.noFindings
-        }`}
+        {`${t.tooth} ${number} · ${description}`}
       </title>
 
       <g
@@ -235,9 +254,9 @@ export function Tooth({
       >
         <rect
           className="tooth-hit"
-          x="-20"
+          x={compact ? -28 : -22}
           y="-49"
-          width="40"
+          width={compact ? 56 : 44}
           height="83"
           rx="9"
           fill="transparent"
@@ -258,9 +277,9 @@ export function Tooth({
 
         {selected && (
           <g
-            fill="#f3d868"
-            stroke="#f3d868"
-            strokeWidth="9"
+            fill="#bfd9c2"
+            stroke="#bfd9c2"
+            strokeWidth="8"
             strokeLinejoin="round"
             aria-hidden="true"
           >
@@ -303,6 +322,7 @@ export function Tooth({
         )}
 
         <path
+          className="tooth-crown"
           d={shape.crown}
           fill={crownFill}
           stroke={missing ? "#858a82" : "#262820"}
@@ -403,8 +423,9 @@ export function Tooth({
           y="-13"
           width="32"
           height="25"
-          rx="2"
-          fill={selected ? "#171913" : "transparent"}
+          rx="5"
+          className="tooth-number-hit"
+          fill={selected ? "#2e5748" : "transparent"}
         />
         <text
           x="0"
@@ -415,17 +436,26 @@ export function Tooth({
           {number}
         </text>
 
-        {categories.map((category, categoryIndex) => (
+        {categories.filter((category) => category !== "caries" || !classes.length).map((category, categoryIndex, visible) => (
           <circle
             key={category}
-            cx={(categoryIndex - (categories.length - 1) / 2) * 4.8}
-            cy="18"
+            cx={(categoryIndex - (visible.length - 1) / 2) * 5.5}
+            cy={compact ? classes.length ? 104 : 99 : upper ? -16 : 16}
             r="2.1"
             fill={COLORS[category]}
             stroke="#30342b"
             strokeWidth=".5"
           />
         ))}
+        {classes.length > 0 && (
+          <g className="tooth-class-badge" data-classes={classes.join(",")}
+            transform={`translate(0 ${compact ? 93 : upper ? -29 : 29})`}>
+            <rect x="-22" y="-8" width="44" height="16" rx="5" fill="#f9e0d8" stroke="#b96856" strokeWidth=".8" />
+            <text textAnchor="middle" y="4" fill="#803d30">
+              {classes.length === 1 ? classes[0] : `${classes[0]} +${classes.length - 1}`}
+            </text>
+          </g>
+        )}
       </g>
     </g>
   );
